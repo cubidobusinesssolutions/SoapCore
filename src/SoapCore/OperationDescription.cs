@@ -1,7 +1,9 @@
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization;
 using System.ServiceModel;
 using System.Threading.Tasks;
+using System.Xml.Schema;
 using System.Xml.Serialization;
 
 namespace SoapCore
@@ -44,7 +46,10 @@ namespace SoapCore
 					.FirstOrDefault(ca =>
 						ca.AttributeType == typeof(MessageContractAttribute)) != null;
 
+			var elementAttribute = operationMethod.ReturnParameter.GetCustomAttribute<XmlElementAttribute>();
 			ReturnName = operationMethod.ReturnParameter.GetCustomAttribute<MessageParameterAttribute>()?.Name ?? Name + "Result";
+			ReturnElementName = elementAttribute?.ElementName;
+			ReturnNamespace = elementAttribute?.Form == XmlSchemaForm.Unqualified ? string.Empty : elementAttribute?.Namespace;
 
 			var faultContractAttributes = operationMethod.GetCustomAttributes<FaultContractAttribute>();
 			Faults = faultContractAttributes
@@ -66,17 +71,33 @@ namespace SoapCore
 		public SoapMethodParameterInfo[] OutParameters { get; private set; }
 		public System.Type[] Faults { get; private set; }
 		public string ReturnName { get; private set; }
+		public string ReturnElementName { get; private set; }
+		public string ReturnNamespace { get; private set; }
 
 		private static SoapMethodParameterInfo CreateParameterInfo(ParameterInfo info, int index, ContractDescription contract)
 		{
 			var elementAttribute = info.GetCustomAttribute<XmlElementAttribute>();
-			var parameterName =
-				elementAttribute?.ElementName ??
-				info.GetCustomAttribute<MessageParameterAttribute>()?.Name ??
-				info.ParameterType.GetCustomAttribute<MessageContractAttribute>()?.WrapperName ??
-				info.Name;
-			var parameterNs = elementAttribute?.Namespace ?? contract.Namespace;
-			return new SoapMethodParameterInfo(info, index, parameterName, parameterNs);
+			var arrayAttribute = info.GetCustomAttribute<XmlArrayAttribute>();
+			var arrayItemAttribute = info.GetCustomAttribute<XmlArrayItemAttribute>();
+			var parameterName = elementAttribute?.ElementName
+				?? arrayAttribute?.ElementName
+				?? info.GetCustomAttribute<MessageParameterAttribute>()?.Name
+				?? info.ParameterType.GetCustomAttribute<MessageContractAttribute>()?.WrapperName
+				?? info.Name;
+			var arrayName = arrayAttribute?.ElementName;
+			var arrayItemName = arrayItemAttribute?.ElementName;
+			var parameterNs = elementAttribute?.Form == XmlSchemaForm.Unqualified
+				? string.Empty
+				: elementAttribute?.Namespace
+				?? arrayAttribute?.Namespace
+				?? contract.Namespace;
+			var dataContractAttribute = info.ParameterType.GetCustomAttribute<DataContractAttribute>();
+			if (dataContractAttribute != null && dataContractAttribute.IsNamespaceSetExplicitly)
+			{
+				parameterNs = dataContractAttribute.Namespace;
+			}
+
+			return new SoapMethodParameterInfo(info, index, parameterName, arrayName, arrayItemName, parameterNs);
 		}
 
 		private static string GetNameByAction(string action)
